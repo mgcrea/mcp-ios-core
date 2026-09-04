@@ -102,8 +102,11 @@ export const registerScreenTools = <T extends ScreenTargetRef>(
     async ({ device, max_dimension, quality, save_path }) =>
       wrapResult(async () => {
         const target = await host.resolveTarget(device);
-        const display = await host.display(target);
+        // Capture first, then ask for the geometry *of that capture*: a host
+        // with no orientation source of its own can only work it out from the
+        // image, and the other order leaves it guessing.
         const png = await (host.screenshotPng?.(target) ?? host.wda(target).screenshot());
+        const display = await host.display(target, png);
         const rendered = await renderScreenshot({
           pngBase64: png,
           display,

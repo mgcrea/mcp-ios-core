@@ -35,8 +35,18 @@ export type ScreenHost<T extends ScreenTargetRef = ScreenTargetRef> = {
   resolveTarget(hint?: string): Promise<T>;
   /** The WebDriverAgent client for that target, cached by the host so the session is reused. */
   wda(target: T): WdaClient;
-  /** Geometry, for the screenshot's point-space scaling. */
-  display(target: T): Promise<DisplayInfo>;
+  /**
+   * Geometry, for the screenshot's point-space scaling.
+   *
+   * `pngBase64` is the capture this geometry is about, when there is one. A
+   * physical device ignores it — `devicectl` reports orientation itself — while
+   * a simulator has no such source and derives orientation by comparing the
+   * capture's own dimensions against its device type's portrait ones. Optional
+   * rather than required because `get_display_info` and diagnostics ask without
+   * capturing anything, and inventing an orientation there would be worse than
+   * reporting that it is unknown.
+   */
+  display(target: T, pngBase64?: string): Promise<DisplayInfo>;
   /**
    * A capture that does not go through WebDriverAgent, when the host has one.
    *

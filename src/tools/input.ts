@@ -64,12 +64,12 @@ export const actionResult = async <T extends ScreenTargetRef>(
   // Let the animation finish. Screenshotting mid-transition returns a frame
   // that is neither the old screen nor the new one, which reads as a failure.
   await sleep(opts.settleMs);
-  const display = await host.display(target);
   const wda = host.wda(target);
   // Prefer the host's own capture when it has one: a simulator can screenshot
   // through `simctl` with no runner at all, and going through WebDriverAgent
   // here would make every action depend on a lane the screenshot does not need.
   const pngBase64 = await (host.screenshotPng?.(target) ?? wda.screenshot());
+  const display = await host.display(target, pngBase64);
   const rendered = await renderScreenshot({
     pngBase64,
     display,
