@@ -33,6 +33,18 @@ export type UiTreeResult = {
   /** How many matched before the byte cap, so a truncated answer is obviously partial. */
   matched: number;
   truncated?: string;
+  /**
+   * What the *filters* removed, as opposed to what the byte cap removed.
+   *
+   * Without this a filtered screen and a bare screen return the same thing — a
+   * short, plausible list — and the reader has no way to tell which they are
+   * looking at. Measured case: a `PHPicker` over Safari answers eleven elements
+   * at the default detail, all of them chrome, while nine photo cells sit on
+   * screen and tappable. Reporting a count is the whole fix; it is a tally of
+   * what this function already decided, so it cannot be wrong the way a guess
+   * about remote views would be.
+   */
+  filtered?: { notVisible?: number; onlyAtWiderDetail?: number; note: string };
 };
 
 export type UiDetail = "interactive" | "labelled" | "all";
@@ -93,15 +105,15 @@ const textOf = (value: unknown): string | undefined => {
 const hasArea = (rect: WdaRect | undefined): rect is WdaRect =>
   rect !== undefined && rect.width > 0 && rect.height > 0;
 
+const hasLabel = (node: WdaNode): boolean =>
+  textOf(node.label) !== undefined || textOf(node.name) !== undefined;
+
 const keep = (node: WdaNode, detail: UiDetail): boolean => {
   if (detail === "all") return true;
   const type = shortType(node.type);
   if (INTERACTIVE_TYPES.has(type)) return true;
   if (detail === "interactive") return false;
-  return (
-    (type === "StaticText" || type === "Image" || type === "Other") &&
-    (textOf(node.label) !== undefined || textOf(node.name) !== undefined)
-  );
+  return (type === "StaticText" || type === "Image" || type === "Other") && hasLabel(node);
 };
 
 const toElement = (node: WdaNode, rect: WdaRect): UiElement => {
@@ -152,16 +164,32 @@ export const flattenTree = (root: WdaNode, opts: FlattenOptions): UiTreeResult =
   const wantedTypes = opts.types && opts.types.length > 0 ? new Set(opts.types) : undefined;
 
   const matches: UiElement[] = [];
+  // Tallies of what the filters threw away, so a filtered screen does not read
+  // as an empty one. Counted in the same pass rather than by re-walking: the
+  // conditions are the same ones being evaluated anyway.
+  let notVisible = 0;
+  let onlyAtWiderDetail = 0;
+
   const visit = (node: WdaNode): void => {
     const rect = node.rect;
-    const visible = opts.includeInvisible === true || isTrue(node.isVisible);
-    if (visible && hasArea(rect) && keep(node, detail)) {
+    if (hasArea(rect)) {
       const element = toElement(node, rect);
       const typeOk = !wantedTypes || wantedTypes.has(element.type);
       const textOk =
         needle === undefined ||
         [element.label, element.id, element.value].some((v) => v?.toLowerCase().includes(needle));
-      if (typeOk && textOk) matches.push(element);
+      if (typeOk && textOk) {
+        const visible = opts.includeInvisible === true || isTrue(node.isVisible);
+        if (keep(node, detail)) {
+          if (visible) matches.push(element);
+          else notVisible += 1;
+        } else if (detail === "interactive" && keep(node, "labelled")) {
+          // Only the one step out. Counting what `all` would add would count
+          // every unlabelled container on the screen, which is a number nobody
+          // can act on.
+          onlyAtWiderDetail += 1;
+        }
+      }
     }
     for (const child of node.children ?? []) visit(child);
   };
@@ -179,6 +207,19 @@ export const flattenTree = (root: WdaNode, opts: FlattenOptions): UiTreeResult =
     bytes += size;
   }
 
+  const notes = [
+    notVisible > 0
+      ? `${notVisible} on-screen ${notVisible === 1 ? "element is" : "elements are"} reported ` +
+        "not visible and left out — usually a row scrolled off a list, but a photo picker or a " +
+        "share sheet reports its own contents that way. `include_invisible: true` includes them."
+      : undefined,
+    onlyAtWiderDetail > 0
+      ? `${onlyAtWiderDetail} more ${onlyAtWiderDetail === 1 ? "carries" : "carry"} a label but ` +
+        `${onlyAtWiderDetail === 1 ? "is" : "are"} not a control; \`detail: "labelled"\` shows ` +
+        `${onlyAtWiderDetail === 1 ? "it" : "them"}.`
+      : undefined,
+  ].filter((n): n is string => n !== undefined);
+
   return {
     coordinateSpace: "points",
     elements,
@@ -188,6 +229,15 @@ export const flattenTree = (root: WdaNode, opts: FlattenOptions): UiTreeResult =
           truncated:
             `Showing ${elements.length} of ${matches.length} elements (${opts.maxBytes} byte cap). ` +
             `Narrow it with \`contains\`, \`types\`${opts.capHint ? `, or ${opts.capHint}` : ""}.`,
+        }
+      : {}),
+    ...(notes.length > 0
+      ? {
+          filtered: {
+            ...(notVisible > 0 ? { notVisible } : {}),
+            ...(onlyAtWiderDetail > 0 ? { onlyAtWiderDetail } : {}),
+            note: notes.join(" "),
+          },
         }
       : {}),
   };

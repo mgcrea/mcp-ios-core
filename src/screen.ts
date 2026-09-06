@@ -76,6 +76,7 @@ export type ScreenHost<T extends ScreenTargetRef = ScreenTargetRef> = {
 export type ToolNames = {
   tap: string;
   tapElement: string;
+  waitForElement: string;
   swipe: string;
   type: string;
   pressButton: string;
@@ -120,6 +121,7 @@ export const toolNames = (naming: ScreenNaming): ToolNames => {
   return {
     tap: `${p}_tap`,
     tapElement: `${p}_tap_element`,
+    waitForElement: `${p}_wait_for_element`,
     swipe: `${p}_swipe`,
     type: `${p}_type`,
     pressButton: `${p}_press_button`,

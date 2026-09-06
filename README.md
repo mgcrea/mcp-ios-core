@@ -53,8 +53,10 @@ import {
   flattenTree, // the tens-of-KB hierarchy → flat elements with tap points
   renderScreenshot, // sips downscale into point space, so image pixels are tap coordinates
   registerInputTools, // tap, tap_element, swipe, type, press_button
-  registerScreenTools, // screenshot, ui_tree, get_display_info
+  registerScreenTools, // screenshot, ui_tree, get_display_info, wait_for_element
   createArgs, // the zod arg atoms, named for the calling server
+  elementQuery, // the id / label / predicate trio → one WDA query
+  CONTROL_PREDICATE, // the clause that keeps a label match off its container
   createExec, // the execFile seam, argv-only, no shell
   ok,
   fail,
@@ -106,6 +108,17 @@ Each of these was measured, and each would be re-derived wrongly in a second cop
 - Scaling to exactly the point size is what makes a position read off a screenshot
   a tap coordinate with no arithmetic in between. `coordinateSpace` says out loud
   when that no longer holds.
+- **A label is carried by the control _and_ by every container around it**, and
+  `findElements` answers depth-first, so an unqualified label match lands on the
+  navigation bar about as often as on the button. A tap on a container is a no-op
+  that reports success, so `tap_element` narrows a label to the interactive types
+  first and only falls back when nothing tappable carries it.
+- **`isVisible` is not always truthful.** Measured on iOS 26.5 with WDA 16.12.3: a
+  `PHPicker` presented over Safari reports all nine of its asset cells
+  `isVisible: "0"` while they are on screen — a synthesised tap on one opens the
+  preview. The default filter drops them, so `flattenTree` returns a `filtered`
+  tally of what it left out rather than a short list that reads like a bare
+  screen.
 
 ## Develop
 

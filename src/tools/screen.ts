@@ -1,15 +1,17 @@
 import type { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 
+import { IosError } from "#/errors";
 import { toolNames, type ScreenTargetRef } from "#/screen";
 import { renderScreenshot } from "#/screenshot";
 import { createArgs } from "#/tools/args";
-import type { ScreenToolsConfig } from "#/tools/input";
+import { actionResult, sleep, type ScreenToolsConfig } from "#/tools/input";
+import { elementQuery, preferControls } from "#/tools/locator";
 import { okImage, wrap, wrapResult } from "#/tools/result";
 import { flattenTree } from "#/ui-tree";
 
 /**
- * The three tools that read the screen without changing it, built once for both
+ * The four tools that read the screen without changing it, built once for both
  * servers.
  *
  * Registered unconditionally, whatever the write gate says: an agent that can
@@ -39,7 +41,7 @@ export const registerScreenTools = <T extends ScreenTargetRef>(
 ): void => {
   const { host, naming } = cfg;
   const names = toolNames(naming);
-  const { detailArg, targetArg } = createArgs(naming);
+  const { detailArg, screenshotArg, targetArg } = createArgs(naming);
 
   if (cfg.includeDisplayInfo !== false) {
     server.registerTool(
@@ -151,6 +153,8 @@ export const registerScreenTools = <T extends ScreenTargetRef>(
         "off a screenshot whenever you can: a label or identifier survives the screen moving, and " +
         "a pixel position does not. The raw hierarchy is tens of KB, so this returns controls " +
         "only by default; use `contains` or `types` to narrow further and `detail` to widen. " +
+        "A short answer is not proof the screen is bare — check the `filtered` field, which " +
+        "counts what the filters left out and names the argument that brings it back. " +
         `Coordinates are in points, the same space ${names.tap} takes.`,
       inputSchema: z.object({
         device: targetArg,
@@ -171,8 +175,12 @@ export const registerScreenTools = <T extends ScreenTargetRef>(
           .boolean()
           .default(false)
           .describe(
-            "Include elements XCUITest marks as not visible. Off by default: they cannot be " +
-              "tapped, and on a scrolling list they outnumber the visible ones many times over.",
+            "Include elements XCUITest marks as not visible. Off by default, because on a " +
+              "scrolling list they outnumber the visible ones many times over — but the flag is " +
+              "not always truthful: a photo picker and a share sheet report their own contents " +
+              "as invisible while they are on screen and respond to a tap. Turn this on when " +
+              "`filtered.notVisible` says something was left out and the screen plainly has more " +
+              "on it than came back.",
           ),
       }),
       annotations: { readOnlyHint: true },
@@ -189,6 +197,126 @@ export const registerScreenTools = <T extends ScreenTargetRef>(
           includeInvisible: include_invisible,
           maxBytes: cfg.maxTreeBytes,
         });
+      }),
+  );
+
+  server.registerTool(
+    names.waitForElement,
+    {
+      title: `${naming.title}: Wait For Element`,
+      description:
+        "Poll until an element appears, or until it goes away. This is the tool for a screen that " +
+        "loads: a generation step, a network round trip, a long import. `settle_ms` on the action " +
+        "tools is a pause for an animation and caps at ten seconds — it is not a wait, and using " +
+        "it as one is how you end up verifying a server instead of the screen. Give exactly one " +
+        `of \`id\`, \`label\` or \`predicate\`, the same way ${names.tapElement} takes them. ` +
+        "**Your MCP client may have a request timeout of its own, commonly 60 seconds**, and it " +
+        "will cut this call off before `timeout_ms` does — for a longer wait, raise it there too " +
+        "or call this twice.",
+      inputSchema: z.object({
+        device: targetArg,
+        id: z
+          .string()
+          .optional()
+          .describe(`Accessibility identifier — the \`id\` field from ${names.uiTree}.`),
+        label: z
+          .string()
+          .optional()
+          .describe(
+            "Exact accessibility label, i.e. the visible text. Matched against controls first, " +
+              `as in ${names.tapElement}.`,
+          ),
+        predicate: z
+          .string()
+          .optional()
+          .describe(
+            'A raw NSPredicate, e.g. `type == "XCUIElementTypeButton" AND label BEGINSWITH "Add"`.',
+          ),
+        absent: z
+          .boolean()
+          .default(false)
+          .describe(
+            "Wait for the element to *stop* matching instead of to start. This is how you wait " +
+              "out a spinner, a progress view or a placeholder, which is the same wait from the " +
+              "other side.",
+          ),
+        timeout_ms: z
+          .number()
+          .int()
+          .min(1000)
+          .max(300_000)
+          .default(30_000)
+          .describe(
+            "How long to keep polling before giving up. Read the note about your client's own " +
+              "request timeout in this tool's description before setting it above 60000.",
+          ),
+        poll_ms: z
+          .number()
+          .int()
+          .min(250)
+          .max(10_000)
+          .default(750)
+          .describe(
+            "How long to wait between polls. Each poll is one query to the device, so a long " +
+              "wait costs less at 2000 than at 250 and arrives at almost the same moment.",
+          ),
+        screenshot: screenshotArg,
+      }),
+      annotations: { readOnlyHint: true },
+    },
+    async ({ device, id, label, predicate, absent, timeout_ms, poll_ms, screenshot }) =>
+      wrapResult(async () => {
+        const base = elementQuery({ id, label, predicate }, names.uiTree);
+        // Same reasoning as tap_element: a bare label is carried by the
+        // container as well as the control, so waiting on one would return the
+        // moment the navigation bar existed.
+        const query = label !== undefined ? preferControls(base) : base;
+        const target = await host.resolveTarget(device);
+        const wda = host.wda(target);
+
+        const started = Date.now();
+        const deadline = started + timeout_ms;
+        let polls = 0;
+        let uuids: string[] = [];
+        for (;;) {
+          polls += 1;
+          uuids = await wda.findElements(query.using, query.value);
+          if (uuids.length > 0 !== absent) break;
+          if (Date.now() >= deadline) {
+            throw new IosError(
+              `Timed out after ${Date.now() - started}ms and ${polls} polls waiting for ` +
+                `${base.using} ${base.value} to ${absent ? "disappear" : "appear"}.`,
+              {
+                remedy:
+                  `Call ${names.uiTree} to see what is actually on screen — the wait may have ` +
+                  "been for something that never renders under that label. Raise `timeout_ms` " +
+                  "if the screen is merely slower than that.",
+              },
+            );
+          }
+          await sleep(poll_ms);
+        }
+
+        const first = uuids[0];
+        return actionResult(
+          host,
+          target,
+          {
+            waited: {
+              // The caller's own locator; see the note in tap_element.
+              using: base.using,
+              value: base.value,
+              ...(absent ? { absent: true } : {}),
+              elapsedMs: Date.now() - started,
+              polls,
+              matched: uuids.length,
+              ...(first ? { rect: await wda.elementRect(first) } : {}),
+            },
+          },
+          // No settle: the caller has just been told the screen changed, and
+          // adding a pause on top of a wait they sized themselves is noise.
+          { screenshot, settleMs: 0, emptyRemedy: cfg.emptyScreenshotRemedy },
+        );
       }),
   );
 };

@@ -90,7 +90,9 @@ export const createArgs = (naming: ScreenNaming) => {
       .default(600)
       .describe(
         "Milliseconds to wait before the follow-up screenshot, so an animation finishes first. " +
-          "Raise it for a screen that loads data; a capture taken mid-transition shows neither state.",
+          "Raise it for a screen that loads data; a capture taken mid-transition shows neither " +
+          "state. This is a pause for an animation, not a wait for work to finish — which is why " +
+          `it stops at ten seconds. For anything longer, use ${names.waitForElement}.`,
       ),
   };
 };

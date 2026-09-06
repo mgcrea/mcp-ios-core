@@ -68,6 +68,9 @@ export const sampleSource = {
 
 export type FetchLike = (url: unknown, init?: unknown) => Promise<Response>;
 
+/** What a route override is handed. An override that ignores it still type-checks. */
+export type WdaRequest = { method: string; path: string; body: unknown };
+
 const json = (value: unknown, extra: Record<string, unknown> = {}): Response =>
   new Response(JSON.stringify({ value, sessionId: "S1", ...extra }), {
     status: 200,
@@ -77,23 +80,29 @@ const json = (value: unknown, extra: Record<string, unknown> = {}): Response =>
 /**
  * A WebDriverAgent stand-in. Routes are matched on the path so a test can assert
  * that a tap really went through `/actions` rather than some other endpoint.
+ *
+ * An override receives the request, because the interesting behaviour on
+ * `/elements` is a function of the *predicate* rather than of the path: a query
+ * narrowed to controls and the unnarrowed one it falls back to hit the same
+ * endpoint, and a mock that cannot tell them apart cannot test either.
  */
 export const wdaMock =
   (
-    overrides: Record<string, () => Response> = {},
-    log: { method: string; path: string; body: unknown }[] = [],
+    overrides: Record<string, (request: WdaRequest) => Response> = {},
+    log: WdaRequest[] = [],
   ): FetchLike =>
   async (url: unknown, init?: unknown): Promise<Response> => {
     const path = new URL(String(url)).pathname + new URL(String(url)).search;
     const request = (init ?? {}) as RequestInit;
-    log.push({
+    const entry: WdaRequest = {
       method: request.method ?? "GET",
       path,
       body: typeof request.body === "string" ? JSON.parse(request.body) : undefined,
-    });
+    };
+    log.push(entry);
 
     for (const [pattern, respond] of Object.entries(overrides)) {
-      if (path.includes(pattern)) return respond();
+      if (path.includes(pattern)) return respond(entry);
     }
     if (path === "/status")
       return json({ ready: true, state: "success", build: { version: "9.0.0" } });

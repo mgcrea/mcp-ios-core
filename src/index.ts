@@ -47,7 +47,7 @@ export type {
   WdaRemedies,
 } from "#/wda/client";
 export { sampleSource, TINY_PNG, wdaMock } from "#/wda/mock";
-export type { FetchLike } from "#/wda/mock";
+export type { FetchLike, WdaRequest } from "#/wda/mock";
 
 export { flattenTree, INTERACTIVE_TYPES, isTrue, shortType } from "#/ui-tree";
 export type { FlattenOptions, UiDetail, UiElement, UiTreeResult } from "#/ui-tree";
@@ -63,6 +63,15 @@ export type { ImageContent, TextContent, ToolResult } from "#/tools/result";
 
 export { createArgs } from "#/tools/args";
 export type { ScreenArgs } from "#/tools/args";
+
+export {
+  CONTROL_PREDICATE,
+  elementQuery,
+  labelQuery,
+  preferControls,
+  quote,
+} from "#/tools/locator";
+export type { ElementQuery } from "#/tools/locator";
 
 export { actionResult, registerInputTools } from "#/tools/input";
 export type { ScreenToolsConfig } from "#/tools/input";

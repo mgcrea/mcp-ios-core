@@ -5,6 +5,7 @@ import { IosError } from "#/errors";
 import { toolNames, type ScreenHost, type ScreenNaming, type ScreenTargetRef } from "#/screen";
 import { renderScreenshot } from "#/screenshot";
 import { createArgs } from "#/tools/args";
+import { elementQuery, preferControls } from "#/tools/locator";
 import { ok, okImage, wrapResult, type ToolResult } from "#/tools/result";
 import type { PointerAction } from "#/wda/client";
 
@@ -39,9 +40,17 @@ export type ScreenToolsConfig<T extends ScreenTargetRef> = {
   buttons: readonly [string, ...string[]];
   /** What to say when a capture comes back empty. */
   emptyScreenshotRemedy: string;
+  /**
+   * What to add when an action finds an alert on screen, in this server's own
+   * words. A simulator can answer a permission prompt before it is ever shown,
+   * and the moment one appears is the moment that is worth knowing; a phone
+   * cannot, so the device server leaves this undefined.
+   */
+  alertHint?: string | undefined;
 };
 
-const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+export const sleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
  * Every action tool ends here, and by default it ends with a fresh screenshot.
@@ -58,7 +67,7 @@ export const actionResult = async <T extends ScreenTargetRef>(
   host: ScreenHost<T>,
   target: T,
   summary: Record<string, unknown>,
-  opts: { screenshot: boolean; settleMs: number; emptyRemedy?: string },
+  opts: { screenshot: boolean; settleMs: number; emptyRemedy?: string; alertHint?: string },
 ): Promise<ToolResult> => {
   if (!opts.screenshot) return ok({ ...summary, ok: true });
   // Let the animation finish. Screenshotting mid-transition returns a frame
@@ -90,7 +99,7 @@ export const actionResult = async <T extends ScreenTargetRef>(
       coordinateSpace: rendered.coordinateSpace,
       // An alert swallows every subsequent tap while telling you nothing, so it
       // is worth one field on every action rather than a puzzle later.
-      ...(alert ? { alert } : {}),
+      ...(alert ? { alert, ...(opts.alertHint ? { alertHint: opts.alertHint } : {}) } : {}),
     },
   );
 };
@@ -101,9 +110,6 @@ const tapActions = (x: number, y: number, holdMs: number): PointerAction[] => [
   { type: "pause", duration: holdMs },
   { type: "pointerUp", button: 0 },
 ];
-
-/** NSPredicate strings are double-quoted; a label containing one would end it early. */
-const quote = (value: string): string => `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 
 /**
  * The drive half.
@@ -122,7 +128,10 @@ export const registerInputTools = <T extends ScreenTargetRef>(
   const { host, naming } = cfg;
   const names = toolNames(naming);
   const { screenshotArg, settleArg, targetArg, xArg, yArg } = createArgs(naming);
-  const tail = { emptyRemedy: cfg.emptyScreenshotRemedy };
+  const tail = {
+    emptyRemedy: cfg.emptyScreenshotRemedy,
+    ...(cfg.alertHint ? { alertHint: cfg.alertHint } : {}),
+  };
   server.registerTool(
     names.tap,
     {
@@ -192,7 +201,9 @@ export const registerInputTools = <T extends ScreenTargetRef>(
           .optional()
           .describe(
             'Exact accessibility label, i.e. the visible text — e.g. "Today". Matched exactly, ' +
-              "and it changes with the app's language, so prefer `id` where one exists.",
+              "and it changes with the app's language, so prefer `id` where one exists. A label " +
+              "is shared by a control and every container around it, so this matches controls " +
+              "first and falls back to the rest only when no control carries it.",
           ),
         predicate: z
           .string()
@@ -204,10 +215,12 @@ export const registerInputTools = <T extends ScreenTargetRef>(
           .number()
           .int()
           .min(0)
-          .default(0)
+          .optional()
           .describe(
-            "Which match to tap when several match, zero-based. The call reports how many matched, " +
-              "so a surprising count is worth checking before assuming the first one is right.",
+            "Which match to tap when several match, zero-based, counted in the order " +
+              `${names.uiTree} lists them. Giving it turns off the control preference \`label\` ` +
+              "normally applies, because it means you have read the tree and are counting real " +
+              "positions in it. Leave it off unless that is what you are doing.",
           ),
         screenshot: screenshotArg,
         settle_ms: settleArg,
@@ -216,29 +229,32 @@ export const registerInputTools = <T extends ScreenTargetRef>(
     },
     async ({ device, id, label, predicate, index, screenshot, settle_ms }) =>
       wrapResult(async () => {
-        const given = [id, label, predicate].filter((v) => v !== undefined);
-        if (given.length !== 1) {
-          throw new IosError("Give exactly one of `id`, `label` or `predicate`.", {
-            remedy: `Call ${names.uiTree} to see which identifiers and labels the screen actually has.`,
-          });
-        }
+        const base = elementQuery({ id, label, predicate }, names.uiTree);
         const target = await host.resolveTarget(device);
         const wda = host.wda(target);
-        const [using, value] =
-          id !== undefined
-            ? (["accessibility id", id] as const)
-            : label !== undefined
-              ? ([
-                  "predicate string",
-                  `label == ${quote(label)} OR name == ${quote(label)}`,
-                ] as const)
-              : (["predicate string", predicate as string] as const);
 
-        const uuids = await wda.findElements(using, value);
-        const chosen = uuids[index];
+        // Narrow a label to controls, unless the caller is counting positions in
+        // the tree themselves. Two round trips only in the case where the label
+        // belongs to nothing tappable — which is the case that was previously
+        // succeeding while doing nothing at all.
+        const narrowing = index === undefined && label !== undefined;
+        let query = narrowing ? preferControls(base) : base;
+        let uuids = await wda.findElements(query.using, query.value);
+        let preferredControl = false;
+        if (narrowing && uuids.length > 0) {
+          preferredControl = true;
+        } else if (narrowing) {
+          // A `StaticText` is still tappable, and refusing one here would break
+          // every screen whose only affordance is a piece of text.
+          query = base;
+          uuids = await wda.findElements(query.using, query.value);
+        }
+
+        const at = index ?? 0;
+        const chosen = uuids[at];
         if (!chosen) {
           throw new IosError(
-            `No element matched ${using} ${value}${uuids.length > 0 ? ` at index ${index} (${uuids.length} matched)` : ""}.`,
+            `No element matched ${base.using} ${base.value}${uuids.length > 0 ? ` at index ${at} (${uuids.length} matched)` : ""}.`,
             {
               remedy:
                 `Call ${names.uiTree} to see what is on screen — the element may not have ` +
@@ -251,7 +267,29 @@ export const registerInputTools = <T extends ScreenTargetRef>(
         return actionResult(
           host,
           target,
-          { tapped: { using, value, index, matched: uuids.length, rect } },
+          {
+            tapped: {
+              // The caller's own locator, not the narrowed one. The control
+              // clause is twenty types long and echoing it would put an extra
+              // ~700 characters on the result of every single tap.
+              using: base.using,
+              value: base.value,
+              index: at,
+              matched: uuids.length,
+              rect,
+              // Both of these exist so an ambiguous match is visible on the call
+              // that made it rather than in a screenshot the caller has to think
+              // to compare.
+              ...(preferredControl ? { preferredControl: true } : {}),
+              ...(uuids.length > 1
+                ? {
+                    note:
+                      `${uuids.length} elements matched and index ${at} was tapped. Pass ` +
+                      "`index`, or a `predicate` naming the type, to choose a different one.",
+                  }
+                : {}),
+            },
+          },
           { screenshot, settleMs: settle_ms, ...tail },
         );
       }),
@@ -346,13 +384,7 @@ export const registerInputTools = <T extends ScreenTargetRef>(
         const wda = host.wda(target);
 
         if (id !== undefined || label !== undefined) {
-          const [using, value] =
-            id !== undefined
-              ? (["accessibility id", id] as const)
-              : ([
-                  "predicate string",
-                  `label == ${quote(label as string)} OR name == ${quote(label as string)}`,
-                ] as const);
+          const { using, value } = elementQuery({ id, label }, names.uiTree);
           const uuid = (await wda.findElements(using, value))[0];
           if (!uuid) {
             throw new IosError(`No field matched ${using} ${value}.`, {
