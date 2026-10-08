@@ -58,6 +58,17 @@ export type { RenderedScreenshot, RenderOptions } from "#/screenshot";
 export { toolNames } from "#/screen";
 export type { ScreenHost, ScreenNaming, ScreenTargetRef, ToolNames } from "#/screen";
 
+export { compactLogLine, MAX_READ_BYTES, readLogFile } from "#/logs";
+export type { LogReadOptions, LogReadResult } from "#/logs";
+
+export {
+  CRASH_KINDS,
+  crashKind,
+  crashProcessName,
+  DEFAULT_CRASH_KINDS,
+  summarizeCrashReport,
+} from "#/crash";
+
 export { compact, fail, ok, okImage, okText, toFailure, wrap, wrapResult } from "#/tools/result";
 export type { ImageContent, TextContent, ToolResult } from "#/tools/result";
 

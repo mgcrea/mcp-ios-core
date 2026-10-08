@@ -52,9 +52,10 @@ export type ScreenHost<T extends ScreenTargetRef = ScreenTargetRef> = {
    *
    * A simulator does: `simctl io … screenshot` works with no runner installed at
    * all, which is why its screenshot tool is registered as a read tool that
-   * needs zero setup. A physical device has no such path — every pixel comes
-   * through the runner — so the device host leaves this undefined and the
-   * shared tool falls back to WDA.
+   * needs zero setup. A physical device has one too since Xcode 27 —
+   * `devicectl device capture screenshot` — but at ~1.7s against WebDriverAgent's
+   * ~0.6s, so the device host tries the runner first and uses it only as the
+   * fallback. Either way the host decides; undefined means WDA alone.
    *
    * Returns base64, matching what WebDriverAgent's `/screenshot` returns.
    */

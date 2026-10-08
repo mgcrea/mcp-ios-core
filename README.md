@@ -62,6 +62,8 @@ import {
   fail,
   wrap, // the MCP result envelope
   wdaMock, // a WDA stand-in, shipped so both servers test against one truth
+  readLogFile, // page a growing console capture by byte cursor, CRLF-safe, prefix-trimmed
+  summarizeCrashReport, // a 100 KB .ips → exception, reason, faulting frames with image names
 } from "@mgcrea/mcp-ios-core";
 ```
 
@@ -84,9 +86,10 @@ type ScreenHost<T extends ScreenTargetRef> = {
 
 `screenshotPng` is the one real asymmetry between the two servers. A simulator
 can be captured through `simctl` with **no runner installed at all**, so its
-screenshot tool works with zero setup; a phone has no such path and every pixel
-comes through WebDriverAgent. The tool is the same either way — the host decides
-which lane it came from.
+screenshot tool works with zero setup. A phone has one too since Xcode 27
+(`devicectl device capture screenshot`), but at ~1.7s against WebDriverAgent's
+~0.6s, so the device host uses it only when the runner is down. The tool is the
+same either way — the host decides which lane it came from.
 
 ## Traps encoded here
 
@@ -108,6 +111,10 @@ Each of these was measured, and each would be re-derived wrongly in a second cop
 - Scaling to exactly the point size is what makes a position read off a screenshot
   a tap coordinate with no arithmetic in between. `coordinateSpace` says out loud
   when that no longer holds.
+- **An app's console is two line formats in one file.** Its stdout bridged through
+  `devicectl --console` arrives with CRLF endings, measured on iOS 27.0, while its
+  unified log mirrored onto stderr does not. `readLogFile` splits on both, so a
+  line never ends in a stray `\r`.
 - **A label is carried by the control _and_ by every container around it**, and
   `findElements` answers depth-first, so an unqualified label match lands on the
   navigation bar about as often as on the button. A tap on a container is a no-op

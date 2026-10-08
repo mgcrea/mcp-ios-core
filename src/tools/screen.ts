@@ -21,9 +21,9 @@ import { flattenTree } from "#/ui-tree";
  *
  * The one asymmetry between the two servers lives in `host.screenshotPng`. A
  * simulator can be captured through `simctl` with no runner installed at all,
- * so its screenshot tool works with zero setup; a phone has no such path and
- * every pixel comes through WebDriverAgent. The tool is the same either way —
- * the host decides which lane it came from.
+ * so its screenshot tool works with zero setup; a phone prefers WebDriverAgent
+ * and falls back to `devicectl` when the runner is down. The tool is the same
+ * either way — the host decides which lane it came from.
  */
 export type ScreenReadConfig<T extends ScreenTargetRef> = ScreenToolsConfig<T> & {
   /**

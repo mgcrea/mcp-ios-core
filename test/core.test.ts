@@ -1,5 +1,11 @@
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
+import { crashKind, crashProcessName, summarizeCrashReport } from "#/crash";
+import { readLogFile } from "#/logs";
 import { toolNames, type ScreenNaming } from "#/screen";
 import { renderScreenshot } from "#/screenshot";
 import { createArgs } from "#/tools/args";
@@ -607,5 +613,92 @@ describe("the WebDriverAgent client", () => {
 
   it("swallows the 404 that means there is simply no alert", async () => {
     expect(await client(wdaMock()).alertText()).toBeUndefined();
+  });
+});
+
+const logFile = async (text: string): Promise<string> => {
+  const dir = await mkdtemp(join(tmpdir(), "ios-core-logs-"));
+  const path = join(dir, "app.log");
+  await writeFile(path, text);
+  return path;
+};
+
+describe("log files", () => {
+  it("shortens the unified-log prefix and strips CRLF from bridged stdout", async () => {
+    const path = await logFile(
+      "2026-10-08 22:09:45.583026+0200 Canopy[13938:5106663] [Sync] started\nfrom print\r\n",
+    );
+    const result = await readLogFile(path, { limit: 10, complete: false });
+    expect(result.lines).toEqual(["22:09:45.583 [Sync] started", "from print"]);
+  });
+
+  it("holds back a half-written line until the writer is done", async () => {
+    const path = await logFile("one\nhalf a li");
+    const running = await readLogFile(path, { limit: 10, complete: false });
+    expect(running.lines).toEqual(["one"]);
+    const resumed = await readLogFile(path, { cursor: running.next, limit: 10, complete: true });
+    expect(resumed.lines).toEqual(["half a li"]);
+  });
+
+  it("filters before limiting, keeps the newest and counts the rest", async () => {
+    const path = await logFile("error one\nnoise\nERROR two\nerror three\n");
+    const result = await readLogFile(path, { filter: "error", limit: 2, complete: false });
+    expect(result.lines).toEqual(["ERROR two", "error three"]);
+    expect(result).toMatchObject({ matched: 3, omitted: 1 });
+  });
+
+  it("rejects a filter that is not a regular expression, with an example", async () => {
+    const path = await logFile("x\n");
+    await expect(readLogFile(path, { filter: "[Sync", limit: 1, complete: false })).rejects.toThrow(
+      /regular expression/,
+    );
+  });
+});
+
+describe("crash reports", () => {
+  it("names report kinds and the process behind a path", () => {
+    expect(crashKind("309")).toBe("crash");
+    expect(crashKind("999")).toBe("bug_type_999");
+    expect(crashProcessName("Retired/ExcUserFault_MobileMail-2026-10-04-070909.ips")).toBe(
+      "MobileMail",
+    );
+  });
+
+  it("resolves the faulting frames' images, and keeps the fatalError text", () => {
+    const header = { app_name: "Canopy", bundleID: "io.mgcrea.Canopy", bug_type: "309" };
+    const report = {
+      procName: "Canopy",
+      exception: { type: "EXC_BREAKPOINT", signal: "SIGTRAP" },
+      asi: { libswiftCore: ["Fatal error: Unexpectedly found nil"] },
+      faultingThread: 0,
+      threads: [
+        {
+          frames: [
+            {
+              imageIndex: 1,
+              symbol: "Garden.load()",
+              symbolLocation: 12,
+              sourceFile: "Garden.swift",
+              sourceLine: 42,
+            },
+            { imageIndex: 0, imageOffset: 255 },
+          ],
+        },
+      ],
+      usedImages: [{ name: "libswiftCore.dylib" }, { name: "Canopy" }],
+    };
+    const summary = summarizeCrashReport(`${JSON.stringify(header)}\n${JSON.stringify(report)}`);
+    expect(summary.header["bundleId"]).toBe("io.mgcrea.Canopy");
+    expect(summary.crash?.["faultingThread"]).toEqual({
+      index: 0,
+      frames: ["0 Canopy Garden.load() + 12 (Garden.swift:42)", "1 libswiftCore.dylib 0xff"],
+    });
+    expect(JSON.stringify(summary.crash?.["applicationSpecificInfo"])).toContain("Fatal error");
+  });
+
+  it("returns a report with no faulting thread as its header alone", () => {
+    const summary = summarizeCrashReport(`{"bug_type":"298"}\n{"memoryStatus":{}}`);
+    expect(summary.crash).toBeUndefined();
+    expect(summary.header["bug_type"]).toBe("298");
   });
 });
