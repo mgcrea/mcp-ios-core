@@ -87,6 +87,40 @@ const readDimensions = async (
   return { width, height };
 };
 
+/**
+ * Width and height from a JPEG's frame header, or undefined if there is none.
+ *
+ * The output is a JPEG sips has just written and this process has just read
+ * back, so its size is already in hand: the SOFn segment carries it, after SOI
+ * and whatever APPn/DQT/DHT segments precede it. Saves the `sips -g` spawn a
+ * second measurement cost on every screenshot.
+ */
+export const jpegDimensions = (jpeg: Buffer): { width: number; height: number } | undefined => {
+  if (jpeg.length < 4 || jpeg[0] !== 0xff || jpeg[1] !== 0xd8) return undefined;
+  let at = 2;
+  while (at + 4 <= jpeg.length) {
+    if (jpeg[at] !== 0xff) return undefined;
+    const marker = jpeg[at + 1] as number;
+    if (marker === 0xff) {
+      at += 1; // fill byte
+      continue;
+    }
+    // Markers without a length: TEM and the restart markers.
+    if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) {
+      at += 2;
+      continue;
+    }
+    const isFrame =
+      marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc;
+    if (isFrame) {
+      if (at + 9 > jpeg.length) return undefined;
+      return { height: jpeg.readUInt16BE(at + 5), width: jpeg.readUInt16BE(at + 7) };
+    }
+    at += 2 + jpeg.readUInt16BE(at + 2);
+  }
+  return undefined;
+};
+
 export const renderScreenshot = async (opts: RenderOptions): Promise<RenderedScreenshot> => {
   const png = Buffer.from(opts.pngBase64, "base64");
   if (png.byteLength === 0) {
@@ -127,8 +161,8 @@ export const renderScreenshot = async (opts: RenderOptions): Promise<RenderedScr
       opts.timeoutMs,
     );
 
-    const rendered = await readDimensions(output, opts);
     const jpeg = await readFile(output);
+    const rendered = jpegDimensions(jpeg) ?? (await readDimensions(output, opts));
 
     // How many device points one image pixel covers. 1 on the default path.
     const pointsPerPixel = native.width / opts.display.pointScale / rendered.width;

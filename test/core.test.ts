@@ -326,6 +326,17 @@ describe("the UI tree", () => {
   });
 });
 
+// What sips writes: SOI, a JFIF APP0 segment, then the SOF0 frame header
+// carrying height and width.
+const jpegOfSize = (width: number, height: number): Buffer =>
+  Buffer.concat([
+    Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]),
+    Buffer.from("JFIF\0\x01\x01\0\0\x01\0\x01\0\0", "latin1"),
+    Buffer.from([0xff, 0xc0, 0x00, 0x11, 0x08]),
+    Buffer.from([height >> 8, height & 0xff, width >> 8, width & 0xff]),
+    Buffer.alloc(10),
+  ]);
+
 describe("the screenshot renderer", () => {
   it("reports point space when the image and the point size coincide", async () => {
     const rendered = await renderScreenshot({
@@ -338,6 +349,29 @@ describe("the screenshot renderer", () => {
     });
     expect(rendered.coordinateSpace).toBe("points");
     expect(rendered.pointsPerPixel).toBe(1);
+  });
+
+  it("measures its own JPEG from the header rather than spawning sips again", async () => {
+    const calls: string[][] = [];
+    const sips = sipsMock();
+    const exec: ExecImpl = async (path, args, timeoutMs) => {
+      calls.push(args);
+      if (args.includes("--out")) {
+        await writeFile(args[args.indexOf("--out") + 1] as string, jpegOfSize(402, 874));
+        return { stdout: "", stderr: "" };
+      }
+      return sips(path, args, timeoutMs);
+    };
+    const rendered = await renderScreenshot({
+      pngBase64: TINY_PNG,
+      display: DISPLAY,
+      sipsPath: "/usr/bin/sips",
+      exec,
+      timeoutMs: 5000,
+      quality: 70,
+    });
+    expect(rendered).toMatchObject({ width: 402, height: 874, coordinateSpace: "points" });
+    expect(calls.filter((args) => args.includes("-g"))).toHaveLength(1);
   });
 
   it("uses the caller's words when the capture comes back empty", async () => {
