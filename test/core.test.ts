@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { crashKind, crashProcessName, summarizeCrashReport } from "#/crash";
+import type { ExecImpl } from "#/exec";
 import { MAX_READ_BYTES, readLogFile } from "#/logs";
 import { toolNames, type ScreenNaming } from "#/screen";
 import { renderScreenshot } from "#/screenshot";
@@ -616,6 +617,33 @@ describe("an alert on screen", () => {
     const result = await harness.call("ios_simulator_wait_for_element", { id: "save" });
     expect(result.alert).toContain("photos");
     expect(result.alertHint).toContain("ios_simulator_set_environment");
+  });
+
+  it("asks about an alert while the screenshot renders, not after", async () => {
+    // Two independent round trips on every action that returns a screenshot.
+    const events: string[] = [];
+    const sips = sipsMock();
+    const exec: ExecImpl = async (path, args, timeoutMs) => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      events.push("sips");
+      return sips(path, args, timeoutMs);
+    };
+    const host = fakeHost({
+      exec,
+      fetch: wdaMock({
+        "/alert/text": () => {
+          events.push("alert");
+          return new Response(JSON.stringify({ value: null, sessionId: "S1" }), {
+            status: 404,
+            headers: { "content-type": "application/json" },
+          });
+        },
+      }),
+    });
+    const harness = await connect((server) => registerInputTools(server, cfg({ host })));
+    const result = await harness.call("ios_simulator_tap", { x: 1, y: 1, settle_ms: 0 });
+    expect(result.isToolError).toBe(false);
+    expect(events.indexOf("alert")).toBeLessThan(events.lastIndexOf("sips"));
   });
 
   it("says nothing extra when the server supplied no hint", async () => {

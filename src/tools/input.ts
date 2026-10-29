@@ -74,6 +74,11 @@ export const actionResult = async <T extends ScreenTargetRef>(
   // that is neither the old screen nor the new one, which reads as a failure.
   await sleep(opts.settleMs);
   const wda = host.wda(target);
+  // Asked now and awaited last: the alert query is one WebDriverAgent round
+  // trip that needs nothing from the capture, so it runs alongside it. A
+  // capture failure is still the error reported, as when the two ran in turn.
+  const alertQuery = wda.alertText();
+  alertQuery.catch(() => {});
   // Prefer the host's own capture when it has one: a simulator can screenshot
   // through `simctl` with no runner at all, and going through WebDriverAgent
   // here would make every action depend on a lane the screenshot does not need.
@@ -88,7 +93,7 @@ export const actionResult = async <T extends ScreenTargetRef>(
     quality: 70,
     ...(opts.emptyRemedy ? { emptyRemedy: opts.emptyRemedy } : {}),
   });
-  const alert = await wda.alertText();
+  const alert = await alertQuery;
   return okImage(
     { type: "image", data: rendered.data, mimeType: rendered.mimeType },
     {
