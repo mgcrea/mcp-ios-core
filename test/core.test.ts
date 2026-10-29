@@ -589,6 +589,35 @@ describe("an alert on screen", () => {
     expect(result.alertHint).toContain("ios_simulator_set_environment");
   });
 
+  it("carries the hint on wait_for_element too, which also reports an alert", async () => {
+    const host = fakeHost({
+      fetch: wdaMock({
+        "/alert/text": () =>
+          new Response(JSON.stringify({ value: "Allow access to your photos?", sessionId: "S1" }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }),
+        "/elements": () =>
+          new Response(
+            JSON.stringify({
+              value: [{ "element-6066-11e4-a52e-4f735466cecf": "E1" }],
+              sessionId: "S1",
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          ),
+      }),
+    });
+    const harness = await connect((server) =>
+      registerScreenTools(
+        server,
+        cfg({ host, alertHint: "Pre-answer it with ios_simulator_set_environment." }),
+      ),
+    );
+    const result = await harness.call("ios_simulator_wait_for_element", { id: "save" });
+    expect(result.alert).toContain("photos");
+    expect(result.alertHint).toContain("ios_simulator_set_environment");
+  });
+
   it("says nothing extra when the server supplied no hint", async () => {
     const host = fakeHost({ fetch: alerting() });
     const harness = await connect((server) => registerInputTools(server, cfg({ host })));

@@ -317,7 +317,12 @@ export const registerScreenTools = <T extends ScreenTargetRef>(
           },
           // No settle: the caller has just been told the screen changed, and
           // adding a pause on top of a wait they sized themselves is noise.
-          { screenshot, settleMs: 0, emptyRemedy: cfg.emptyScreenshotRemedy },
+          {
+            screenshot,
+            settleMs: 0,
+            emptyRemedy: cfg.emptyScreenshotRemedy,
+            ...(cfg.alertHint ? { alertHint: cfg.alertHint } : {}),
+          },
         );
       }),
   );
