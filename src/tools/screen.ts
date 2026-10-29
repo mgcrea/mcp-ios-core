@@ -294,7 +294,9 @@ export const registerScreenTools = <T extends ScreenTargetRef>(
               },
             );
           }
-          await sleep(poll_ms);
+          // Never past the deadline: a poll_ms longer than what is left would
+          // otherwise hold the call open well beyond the timeout it was given.
+          await sleep(Math.min(poll_ms, deadline - Date.now()));
         }
 
         const first = uuids[0];

@@ -544,6 +544,19 @@ describe("waiting for an element", () => {
     expect(result.remedy).toContain("ios_simulator_ui_tree");
   });
 
+  it("gives up at timeout_ms, not up to a whole poll_ms after it", async () => {
+    const host = fakeHost({ fetch: elementsBy(() => []) });
+    const harness = await connect((server) => registerScreenTools(server, cfg({ host })));
+    const started = Date.now();
+    const result = await harness.call("ios_simulator_wait_for_element", {
+      label: "Never",
+      poll_ms: 3000,
+      timeout_ms: 1000,
+    });
+    expect(result.isToolError).toBe(true);
+    expect(Date.now() - started).toBeLessThan(2000);
+  });
+
   it("is a read tool, so it survives a server with writes turned off", async () => {
     const harness = await connect((server) => registerScreenTools(server, cfg()));
     expect(await harness.names()).toContain("ios_simulator_wait_for_element");
