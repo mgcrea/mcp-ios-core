@@ -90,21 +90,25 @@ export const readLogFile = async (path: string, opts: LogReadOptions): Promise<L
   }
 
   const handle = await open(path, "r");
-  let text: string;
+  let buffer: Buffer;
   try {
-    const buffer = Buffer.alloc(size - start);
+    buffer = Buffer.alloc(size - start);
     await handle.read(buffer, 0, buffer.length, start);
-    text = buffer.toString("utf8");
   } finally {
     await handle.close();
   }
 
-  const end = opts.complete ? text.length : text.lastIndexOf("\n") + 1;
-  const next = start + Buffer.byteLength(text.slice(0, end), "utf8");
+  // Cut on the raw bytes, not the decoded text: a window that starts inside a
+  // multi-byte character, or a line of invalid UTF-8, decodes to U+FFFD, which
+  // re-encodes longer than the bytes it replaced and would push `next` past
+  // the start of the following line.
+  const end = opts.complete ? buffer.length : buffer.lastIndexOf(0x0a) + 1;
+  const next = start + end;
+  const text = buffer.subarray(0, end).toString("utf8");
   // `\r\n`, not `\n`: an app's stdout bridged through `devicectl --console`
   // arrives with CRLF endings — measured on iOS 27.0 — while its mirrored
   // unified log on stderr does not, so one capture holds both.
-  let lines = text.slice(0, end).split(/\r?\n/);
+  let lines = text.split(/\r?\n/);
   if (skippedBytes > 0) lines = lines.slice(1); // started mid-line
   lines = lines.filter((line) => line.length > 0);
 

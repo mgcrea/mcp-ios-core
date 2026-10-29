@@ -1,11 +1,11 @@
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { appendFile, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
 import { crashKind, crashProcessName, summarizeCrashReport } from "#/crash";
-import { readLogFile } from "#/logs";
+import { MAX_READ_BYTES, readLogFile } from "#/logs";
 import { toolNames, type ScreenNaming } from "#/screen";
 import { renderScreenshot } from "#/screenshot";
 import { createArgs } from "#/tools/args";
@@ -635,7 +635,7 @@ describe("the WebDriverAgent client", () => {
   });
 });
 
-const logFile = async (text: string): Promise<string> => {
+const logFile = async (text: string | Buffer): Promise<string> => {
   const dir = await mkdtemp(join(tmpdir(), "ios-core-logs-"));
   const path = join(dir, "app.log");
   await writeFile(path, text);
@@ -657,6 +657,20 @@ describe("log files", () => {
     expect(running.lines).toEqual(["one"]);
     const resumed = await readLogFile(path, { cursor: running.next, limit: 10, complete: true });
     expect(resumed.lines).toEqual(["half a li"]);
+  });
+
+  it("resumes at the right byte when the window starts inside a UTF-8 character", async () => {
+    // The 4 MiB window starts on the second byte of "é". Decoded, that stray
+    // byte is one U+FFFD, three bytes long, and a cursor counted from the
+    // decoded text lands two bytes past the end of the last line.
+    const head = Buffer.concat([Buffer.from("a".repeat(9)), Buffer.from("é\n")]);
+    const filler = Buffer.from(`${"z".repeat(MAX_READ_BYTES - 3)}\n`);
+    const path = await logFile(Buffer.concat([head, filler]));
+    const first = await readLogFile(path, { limit: 1, complete: false });
+    expect(first.skippedBytes).toBe(10);
+    await appendFile(path, "second\n");
+    const resumed = await readLogFile(path, { cursor: first.next, limit: 10, complete: false });
+    expect(resumed.lines).toEqual(["second"]);
   });
 
   it("filters before limiting, keeps the newest and counts the rest", async () => {
