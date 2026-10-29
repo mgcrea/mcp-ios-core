@@ -48,6 +48,32 @@ export const preferControls = (query: ElementQuery): ElementQuery => ({
 });
 
 /**
+ * What carries a screen's labels without being the thing labelled: the
+ * navigation bar repeating its title button, the `Other` wrapping a row, the
+ * window. A wait that falls back past the controls must still not stop on one.
+ */
+const CONTAINER_PREDICATE = [
+  "Application",
+  "Window",
+  "Other",
+  "Group",
+  "NavigationBar",
+  "TabBar",
+  "Toolbar",
+  "Table",
+  "CollectionView",
+  "ScrollView",
+]
+  .map((type) => `type == "XCUIElementType${type}"`)
+  .join(" OR ");
+
+/** The same query, without the containers that repeat a control's label. */
+export const withoutContainers = (query: ElementQuery): ElementQuery => ({
+  using: "predicate string",
+  value: `(${query.value}) AND NOT (${CONTAINER_PREDICATE})`,
+});
+
+/**
  * Resolve the `id` / `label` / `predicate` trio to one WebDriverAgent query.
  *
  * `id` keeps the `accessibility id` strategy rather than becoming a predicate

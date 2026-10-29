@@ -495,9 +495,12 @@ describe("tapping an element by label", () => {
 
 describe("waiting for an element", () => {
   it("returns as soon as it appears, reporting what it cost", async () => {
+    // Counted on the controls query: a poll that finds no control also asks
+    // the non-container fallback, which finds nothing here either.
     let polls = 0;
     const host = fakeHost({
-      fetch: elementsBy(() => {
+      fetch: elementsBy((p) => {
+        if (!p.includes("XCUIElementTypeButton")) return [];
         polls += 1;
         return polls < 3 ? [] : ["E1"];
       }),
@@ -530,6 +533,61 @@ describe("waiting for an element", () => {
     });
     expect(result.waited.absent).toBe(true);
     expect(result.waited.matched).toBe(0);
+  });
+
+  it("finds a label only a StaticText carries, after no control matched", async () => {
+    const host = fakeHost({
+      fetch: elementsBy((p) => (p.includes("XCUIElementTypeButton") ? [] : ["TEXT"])),
+    });
+    const harness = await connect((server) => registerScreenTools(server, cfg({ host })));
+    const result = await harness.call("ios_simulator_wait_for_element", {
+      label: "Welcome back",
+      poll_ms: 250,
+      timeout_ms: 1000,
+    });
+    expect(result.isToolError).toBe(false);
+    expect(result.waited.matched).toBe(1);
+  });
+
+  it("waits out a spinner, which is not a control, until it is really gone", async () => {
+    // The fallback query must be the one that sees an ActivityIndicator.
+    let polls = 0;
+    const host = fakeHost({
+      fetch: elementsBy((p) => {
+        if (p.includes("XCUIElementTypeButton")) return [];
+        polls += 1;
+        return polls < 3 ? ["SPINNER"] : [];
+      }),
+    });
+    const harness = await connect((server) => registerScreenTools(server, cfg({ host })));
+    const result = await harness.call("ios_simulator_wait_for_element", {
+      label: "Loading",
+      absent: true,
+      poll_ms: 250,
+      timeout_ms: 5000,
+    });
+    expect(result.isToolError).toBe(false);
+    expect(result.waited.polls).toBe(3);
+  });
+
+  it("does not let a navigation bar carrying the label end a wait for the button", async () => {
+    // The fallback excludes containers, which is what the narrowing was for.
+    const log: WdaRequest[] = [];
+    const host = fakeHost({
+      fetch: elementsBy(
+        (p) => (p.includes("XCUIElementTypeButton") || p.includes("NOT") ? [] : ["NAVBAR"]),
+        log,
+      ),
+    });
+    const harness = await connect((server) => registerScreenTools(server, cfg({ host })));
+    const result = await harness.call("ios_simulator_wait_for_element", {
+      label: "Identify",
+      poll_ms: 250,
+      timeout_ms: 1000,
+    });
+    expect(result.isToolError).toBe(true);
+    const fallback = log.map(predicateOf).find((p) => p.includes("NOT"));
+    expect(fallback).toContain('"XCUIElementTypeNavigationBar"');
   });
 
   it("fails with the elapsed time and the caller's own tool to check next", async () => {

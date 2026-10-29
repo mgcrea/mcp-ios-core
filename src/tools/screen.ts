@@ -6,7 +6,7 @@ import { toolNames, type ScreenTargetRef } from "#/screen";
 import { renderScreenshot } from "#/screenshot";
 import { createArgs } from "#/tools/args";
 import { actionResult, sleep, type ScreenToolsConfig } from "#/tools/input";
-import { elementQuery, preferControls } from "#/tools/locator";
+import { elementQuery, preferControls, withoutContainers } from "#/tools/locator";
 import { okImage, wrap, wrapResult } from "#/tools/result";
 import { flattenTree } from "#/ui-tree";
 
@@ -224,7 +224,8 @@ export const registerScreenTools = <T extends ScreenTargetRef>(
           .optional()
           .describe(
             "Exact accessibility label, i.e. the visible text. Matched against controls first, " +
-              `as in ${names.tapElement}.`,
+              `as in ${names.tapElement}, then against any element that is not a container ` +
+              "(text, images, spinners), never a navigation bar or a wrapper repeating the label.",
           ),
         predicate: z
           .string()
@@ -269,8 +270,12 @@ export const registerScreenTools = <T extends ScreenTargetRef>(
         const base = elementQuery({ id, label, predicate }, names.uiTree);
         // Same reasoning as tap_element: a bare label is carried by the
         // container as well as the control, so waiting on one would return the
-        // moment the navigation bar existed.
+        // moment the navigation bar existed. Unlike tap_element the fallback
+        // still leaves containers out, because a wait has no index to
+        // disambiguate with — but it does reach text and spinners, which are
+        // not controls and are most of what anyone waits for.
         const query = label !== undefined ? preferControls(base) : base;
+        const fallback = label !== undefined ? withoutContainers(base) : undefined;
         const target = await host.resolveTarget(device);
         const wda = host.wda(target);
 
@@ -281,6 +286,9 @@ export const registerScreenTools = <T extends ScreenTargetRef>(
         for (;;) {
           polls += 1;
           uuids = await wda.findElements(query.using, query.value);
+          if (fallback && uuids.length === 0) {
+            uuids = await wda.findElements(fallback.using, fallback.value);
+          }
           if (uuids.length > 0 !== absent) break;
           if (Date.now() >= deadline) {
             throw new IosError(
