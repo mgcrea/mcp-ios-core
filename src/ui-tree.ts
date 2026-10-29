@@ -161,7 +161,8 @@ export type FlattenOptions = {
 export const flattenTree = (root: WdaNode, opts: FlattenOptions): UiTreeResult => {
   const detail = opts.detail ?? "interactive";
   const needle = opts.contains?.toLowerCase();
-  const wantedTypes = opts.types && opts.types.length > 0 ? new Set(opts.types) : undefined;
+  const wantedTypes =
+    opts.types && opts.types.length > 0 ? new Set(opts.types.map(shortType)) : undefined;
 
   const matches: UiElement[] = [];
   // Tallies of what the filters threw away, so a filtered screen does not read

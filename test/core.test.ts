@@ -179,6 +179,28 @@ describe("the UI tree", () => {
     expect(tree.elements.map((e) => e.label)).toEqual(["Visible"]);
   });
 
+  it("matches a `types` filter given in the long XCUIElementType form too", () => {
+    // The long form is how predicates spell a type, including the examples in
+    // these tools' own descriptions, so a caller copying one is not wrong.
+    const tree = flattenTree(
+      {
+        type: "Application",
+        rect: { x: 0, y: 0, width: 402, height: 874 },
+        isVisible: "1",
+        children: [
+          {
+            type: "Button",
+            label: "Add",
+            rect: { x: 0, y: 0, width: 50, height: 50 },
+            isVisible: "1",
+          },
+        ],
+      },
+      { maxBytes: 24_000, types: ["XCUIElementTypeButton"] },
+    );
+    expect(tree.elements.map((e) => e.label)).toEqual(["Add"]);
+  });
+
   it("names the caller's own variable when it truncates", () => {
     const tree = flattenTree(
       {
