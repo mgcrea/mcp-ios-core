@@ -111,7 +111,11 @@ export class WdaClient {
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     this.logger?.debug?.("wda", method, path);
 
+    // The timer covers the body as well as the headers: a multi-MB screenshot
+    // over a CoreDevice tunnel can stall after the status line, and a read
+    // outside the timer would wait on it for ever.
     let res: Response;
+    let text: string;
     try {
       res = await this.fetchImpl(url, {
         method,
@@ -120,6 +124,7 @@ export class WdaClient {
           ? {}
           : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
       });
+      text = await res.text();
     } catch (err) {
       // A refused connection and an aborted one mean the same thing to the
       // caller — the runner is not up — and neither is worth a retry, so they
@@ -135,7 +140,6 @@ export class WdaClient {
       clearTimeout(timer);
     }
 
-    const text = await res.text();
     let envelope: WdaEnvelope<T>;
     try {
       envelope = JSON.parse(text) as WdaEnvelope<T>;

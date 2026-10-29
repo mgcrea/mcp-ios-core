@@ -586,6 +586,25 @@ describe("the WebDriverAgent client", () => {
     await expect(c.status()).rejects.toMatchObject({ wdaCode: "no such element" });
   });
 
+  it("times out a body that stalls after the headers, not only the headers", async () => {
+    // A multi-MB /screenshot over a CoreDevice tunnel can stall mid-body. The
+    // stream errors on abort, as undici's does.
+    const c = client(
+      async (_url: string, init: RequestInit) =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              init.signal?.addEventListener("abort", () =>
+                controller.error(new DOMException("aborted", "AbortError")),
+              );
+            },
+          }),
+          { status: 200 },
+        ),
+    );
+    await expect(c.status()).rejects.toMatchObject({ name: "WdaUnavailableError" });
+  }, 5000);
+
   it("attaches the caller's remedy rather than one naming another server", async () => {
     const c = client(
       async () =>
