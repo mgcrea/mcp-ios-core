@@ -1,6 +1,6 @@
 {
   "name": "@mgcrea/mcp-ios-core",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "WebDriverAgent client, XCUITest tree shaping and shared MCP tools for driving an iOS screen",
   "keywords": [
     "ios",
