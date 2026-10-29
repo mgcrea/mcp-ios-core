@@ -91,6 +91,8 @@ export class WdaClient {
    * stale one is cheap to detect and recreate.
    */
   private sessionId: string | undefined;
+  /** A `POST /session` in flight, shared so parallel callers create one session, not two. */
+  private creating: Promise<string> | undefined;
 
   constructor(opts: WdaOptions) {
     this.baseUrl = opts.baseUrl;
@@ -206,6 +208,15 @@ export class WdaClient {
    */
   private async session(): Promise<string> {
     if (this.sessionId) return this.sessionId;
+    // WDA keeps one active session: a second creation racing the first would
+    // leave the first caller holding an id that is already stale.
+    this.creating ??= this.createSession().finally(() => {
+      this.creating = undefined;
+    });
+    return this.creating;
+  }
+
+  private async createSession(): Promise<string> {
     const value = await this.request<{ sessionId?: string }>("POST", "/session", {
       capabilities: { alwaysMatch: {} },
     });

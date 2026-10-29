@@ -811,6 +811,15 @@ describe("the WebDriverAgent client", () => {
     await expect(c.status()).rejects.toMatchObject({ name: "WdaUnavailableError" });
   }, 5000);
 
+  it("creates one session for two calls that both start without one", async () => {
+    // WDA keeps a single active session, so a second POST /session would leave
+    // the first call holding a stale id and paying a retry.
+    const log: WdaRequest[] = [];
+    const c = client(wdaMock({}, log));
+    await Promise.all([c.windowSize(), c.windowSize()]);
+    expect(log.filter((r) => r.method === "POST" && r.path === "/session")).toHaveLength(1);
+  });
+
   it("attaches the caller's remedy rather than one naming another server", async () => {
     const c = client(
       async () =>
