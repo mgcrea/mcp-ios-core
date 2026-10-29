@@ -397,6 +397,7 @@ export const registerInputTools = <T extends ScreenTargetRef>(
             });
           }
           if (clear_first) {
+            await wda.clear(uuid);
             await wda.setValue(uuid, text);
           } else {
             await wda.click(uuid);

@@ -566,6 +566,28 @@ describe("waiting for an element", () => {
   });
 });
 
+describe("typing", () => {
+  it("clears the field before typing when clear_first is set", async () => {
+    // WebDriverAgent 16.12.3's `POST /element/:uuid/value` types with
+    // `shouldClear:NO` (FBElementCommands.m); clearing is its own route.
+    const log: WdaRequest[] = [];
+    const host = fakeHost({ fetch: wdaMock({}, log) });
+    const harness = await connect((server) => registerInputTools(server, cfg({ host })));
+    const result = await harness.call("ios_simulator_type", {
+      id: "name",
+      text: "Monstera",
+      clear_first: true,
+      screenshot: false,
+    });
+    expect(result.isToolError).toBe(false);
+    const paths = log.map((r) => r.path);
+    const clear = paths.findIndex((p) => p.endsWith("/element/E1/clear"));
+    const value = paths.findIndex((p) => p.endsWith("/element/E1/value"));
+    expect(clear).toBeGreaterThan(-1);
+    expect(clear).toBeLessThan(value);
+  });
+});
+
 /** WDA answering `/alert/text` with a real alert instead of its usual 404. */
 const alerting = () =>
   wdaMock({

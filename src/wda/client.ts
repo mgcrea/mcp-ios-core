@@ -342,6 +342,16 @@ export class WdaClient {
     );
   }
 
+  /**
+   * Empty a text field. A separate route because `setValue` never clears:
+   * WebDriverAgent 16.12.3 types its text with `shouldClear:NO`.
+   */
+  async clear(uuid: string): Promise<void> {
+    await this.withSession((id) =>
+      this.request<unknown>("POST", `/session/${id}/element/${encodeURIComponent(uuid)}/clear`, {}),
+    );
+  }
+
   async setValue(uuid: string, text: string): Promise<void> {
     await this.withSession((id) =>
       this.request<unknown>("POST", `/session/${id}/element/${encodeURIComponent(uuid)}/value`, {
